@@ -11,6 +11,7 @@ from app.services.parsing import parse_file
 from app.services.chunking import chunk_pages
 from app.services.embeddings import embed_passages, embed_query
 from app.services.llm import build_prompt, try_ollama
+from app.services.fallback_answer import build_fallback_answer
 
 router = APIRouter()
 
@@ -19,6 +20,24 @@ STORAGE_DIR = Path("storage")
 @router.get("/health")
 def health():
     return {"status": "ok"}
+
+@router.get("/collections")
+def list_collections(db: Session = Depends(get_db)):
+    rows = db.query(Document.collection_id).distinct().all()
+    return {"collections": [r[0] for r in rows]}
+
+@router.get("/documents")
+def list_documents(collection_id: str = "default", db: Session = Depends(get_db)):
+    docs = (
+        db.query(Document)
+        .filter(Document.collection_id == collection_id)
+        .order_by(Document.id.desc())
+        .all()
+    )
+    return {
+        "collection_id": collection_id,
+        "documents": [{"id": d.id, "filename": d.filename} for d in docs],
+    }
 
 @router.post("/documents/upload")
 def upload_document(
@@ -131,13 +150,9 @@ def chat(req: ChatRequest, db: Session = Depends(get_db)):
     prompt = build_prompt(q, contexts)
     answer = try_ollama(prompt)
 
-    # fallback nếu chưa dùng Ollama
+    answer = try_ollama(prompt)
+
     if not answer:
-        best = citations[0]
-        answer = (
-            "Mình tìm được đoạn liên quan nhất như sau (trích từ tài liệu):\n\n"
-            f"{best['snippet']}\n\n"
-            "Bạn có thể bật USE_OLLAMA=true để mình trả lời dạng tổng hợp hơn."
-        )
+        answer = build_fallback_answer(q, contexts)
 
     return {"answer": answer, "citations": citations}
