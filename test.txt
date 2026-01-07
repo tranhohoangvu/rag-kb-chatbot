@@ -1,1 +1,70 @@
-﻿Đây là tài liệu test. Mục tiêu dự án là xây RAG chatbot hỏi đáp theo tài liệu.
+﻿# Demo Knowledge Base — RAG KB Chatbot (TEST)
+
+## 1) Tổng quan
+Dự án này là một chatbot hỏi đáp theo tài liệu (RAG). Khi bạn upload file, hệ thống sẽ:
+1) Parse nội dung
+2) Chia nhỏ (chunking)
+3) Tạo embedding (vector)
+4) Lưu vào Postgres + pgvector
+5) Khi hỏi, hệ thống tìm top-k đoạn liên quan nhất và trả về kèm citations.
+
+Câu nhắc để test tìm kiếm chính xác: **"HỒNG TRÀ ĐÁ KHÔNG ĐƯỜNG"**.
+
+## 2) Kiến trúc (Architecture)
+- Backend: FastAPI (port 8000)
+- Frontend: Vite React (port 5173)
+- Database: Postgres + pgvector (port 5432)
+
+Luồng dữ liệu:
+User -> Upload -> Documents/Chunks -> Embedding -> Vector DB -> Retrieval -> Answer + Citations
+
+## 3) Cấu hình quan trọng
+### 3.1 Environment variables
+- DATABASE_URL: chuỗi kết nối Postgres
+- EMBED_MODEL_NAME: model embedding (mặc định: intfloat/multilingual-e5-small)
+- EMBED_DIM: dimension embedding (ví dụ: 384)
+
+### 3.2 Bật Ollama (Optional)
+Nếu USE_OLLAMA=true, backend sẽ gọi Ollama để tạo câu trả lời tổng hợp dựa trên CONTEXT.
+Nếu USE_OLLAMA=false, hệ thống sẽ fallback: trích đoạn liên quan nhất (snippet) và trả về citations.
+
+Mệnh đề để test: **USE_OLLAMA=true sẽ giúp câu trả lời tự nhiên hơn**.
+
+## 4) API Endpoints demo
+- GET /health -> {"status":"ok"}
+- POST /documents/upload (multipart):
+  - collection_id: string
+  - file: pdf/docx/txt/txt
+- POST /chat (json):
+  - question: string
+  - collection_id: string
+  - top_k: number (1..10)
+
+Câu để test endpoint: **"POST /chat nhận JSON gồm question, collection_id, top_k."**
+
+## 5) FAQ
+### 5.1 Vì sao phải chunk?
+Vì LLM/embedding làm việc tốt hơn với đoạn văn ngắn. Chunk giúp truy vấn chính xác hơn và citations rõ ràng hơn.
+
+### 5.2 Dữ liệu ít có cần index ivfflat không?
+Không cần. Với dữ liệu ít, brute-force vẫn nhanh và thường chính xác hơn.
+Khi dữ liệu nhiều (vài nghìn chunks trở lên), hãy dùng HNSW hoặc ivfflat để tăng tốc.
+
+### 5.3 pgvector “vector type does not exist”
+Bạn phải chạy:
+CREATE EXTENSION IF NOT EXISTS vector;
+
+## 6) Thông tin giả lập để hỏi thử
+- Chính sách hoàn tiền: hoàn tiền trong vòng 7 ngày nếu lỗi kỹ thuật.
+- Thời gian phản hồi hỗ trợ: 24–48 giờ.
+- Mật khẩu demo không được dùng ngoài môi trường test.
+
+Một câu dài để ép tạo nhiều chunks (đừng xóa): 
+Chatbot RAG có nhiệm vụ trả lời dựa trên tri thức trong tài liệu, vì vậy bạn nên kiểm tra citations để biết câu trả lời đang dựa trên đoạn nào, thuộc tài liệu nào, và nếu là PDF thì còn có thể có thông tin trang (page) để dễ đối chiếu. Khi bạn hỏi “HỒNG TRÀ ĐÁ KHÔNG ĐƯỜNG”, hệ thống cần trả về đoạn chứa đúng cụm từ này và citations phải hiển thị snippet tương ứng.
+
+## 7) Câu hỏi gợi ý để test
+1) “Kiến trúc dự án gồm những thành phần nào?”
+2) “Port của backend là bao nhiêu?”
+3) “Câu nhắc để test tìm kiếm chính xác là gì?”
+4) “Làm sao để bật Ollama?”
+5) “Endpoint /chat nhận JSON gồm những field nào?”
