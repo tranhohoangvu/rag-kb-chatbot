@@ -1,16 +1,24 @@
+from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+BASE_DIR = Path(__file__).resolve().parents[2]  # .../backend
 
-    APP_ENV: str = "dev"
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=str(BASE_DIR / ".env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
     DATABASE_URL: str
 
     EMBED_MODEL_NAME: str = "intfloat/multilingual-e5-small"
     EMBED_DIM: int = 384
 
-    USE_OLLAMA: bool = False
-    OLLAMA_BASE_URL: str = "http://localhost:11434"
-    OLLAMA_MODEL: str = "qwen2.5:7b-instruct"
+    # RAG gating: nếu cosine distance của chunk tốt nhất > ngưỡng này => coi như "không đủ liên quan"
+    # (cosine distance càng nhỏ càng giống)
+    RAG_MAX_COSINE_DISTANCE: float = 0.35
+
 
 settings = Settings()

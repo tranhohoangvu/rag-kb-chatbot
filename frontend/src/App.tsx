@@ -191,10 +191,6 @@ export default function App() {
           </div>
         )}
         </div>
-
-        <div className="mt-4 text-xs text-gray-500">
-          Tip: Nếu muốn câu trả lời “tổng hợp” hơn, bật Ollama: set USE_OLLAMA=true trong backend/.env.
-        </div>
       </div>
     </div>
   );

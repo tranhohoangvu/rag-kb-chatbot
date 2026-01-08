@@ -14,7 +14,6 @@ A lightweight **Retrieval-Augmented Generation (RAG)** chatbot that lets you **u
 - Chat endpoint returns:
   - `answer`
   - `citations[]` (filename, doc_id, page, snippet)
-- Optional: turn on **Ollama** for more natural “summarized” answers
 
 ---
 
@@ -51,11 +50,6 @@ DATABASE_URL=postgresql+psycopg://rag:rag@localhost:5432/ragdb
 # Embeddings (local)
 EMBED_MODEL_NAME=intfloat/multilingual-e5-small
 EMBED_DIM=384
-
-# Optional: Ollama
-USE_OLLAMA=false
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=qwen2.5:3b-instruct
 
 # Optional: reduce HF warnings
 HF_HUB_DISABLE_SYMLINKS_WARNING=1
@@ -218,33 +212,6 @@ curl.exe -X POST "http://127.0.0.1:8000/chat" `
 
 ---
 
-## Optional: Enable Ollama (better answers)
-
-If you don’t want to download extra models, keep `USE_OLLAMA=false` (fallback returns best snippet + citations).
-
-If you want more natural answers:
-
-1) Install Ollama and confirm it runs:
-```bash
-ollama --version
-curl http://localhost:11434/api/tags
-```
-
-2) Pull a small model (example):
-```bash
-ollama pull qwen2.5:3b-instruct
-```
-
-3) Set in `backend/.env`:
-```env
-USE_OLLAMA=true
-OLLAMA_MODEL=qwen2.5:3b-instruct
-```
-
-4) Restart backend.
-
----
-
 ## Vector index (pgvector)
 
 For small datasets, brute-force search is fine.
@@ -291,7 +258,6 @@ First run downloads the embedding model and can take time. After that it uses ca
 - Delete document / clear collection endpoints
 - Better chunking + dedup + rerank
 - HNSW indexing by default for larger KBs
-- Streaming responses when Ollama is enabled
 
 ---
 

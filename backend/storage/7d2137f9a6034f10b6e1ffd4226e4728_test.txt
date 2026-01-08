@@ -1,1 +1,0 @@
-﻿Đây là tài liệu test. Mục tiêu dự án là xây RAG chatbot hỏi đáp theo tài liệu.

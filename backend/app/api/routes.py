@@ -4,27 +4,30 @@ from sqlalchemy.orm import Session
 from pathlib import Path
 from uuid import uuid4
 
+from app.core.config import settings
 from app.db.session import get_db
 from app.db.models import Document, Chunk
 
 from app.services.parsing import parse_file
 from app.services.chunking import chunk_pages
 from app.services.embeddings import embed_passages, embed_query
-from app.services.llm import build_prompt, try_ollama
 from app.services.fallback_answer import build_fallback_answer
 
 router = APIRouter()
 
 STORAGE_DIR = Path("storage")
 
+
 @router.get("/health")
 def health():
     return {"status": "ok"}
+
 
 @router.get("/collections")
 def list_collections(db: Session = Depends(get_db)):
     rows = db.query(Document.collection_id).distinct().all()
     return {"collections": [r[0] for r in rows]}
+
 
 @router.get("/documents")
 def list_documents(collection_id: str = "default", db: Session = Depends(get_db)):
@@ -38,6 +41,7 @@ def list_documents(collection_id: str = "default", db: Session = Depends(get_db)
         "collection_id": collection_id,
         "documents": [{"id": d.id, "filename": d.filename} for d in docs],
     }
+
 
 @router.post("/documents/upload")
 def upload_document(
@@ -71,13 +75,12 @@ def upload_document(
     if not chunks:
         raise HTTPException(status_code=400, detail="Chunking produced no chunks")
 
-    # embed chunks (batch)
     texts = [c["content"] for c in chunks]
     vectors = embed_passages(texts)
 
     doc = Document(collection_id=collection_id, filename=file.filename)
     db.add(doc)
-    db.flush()  # get doc.id
+    db.flush()
 
     chunk_rows = []
     for i, c in enumerate(chunks):
@@ -102,10 +105,12 @@ def upload_document(
         "chunks_indexed": len(chunk_rows),
     }
 
+
 class ChatRequest(BaseModel):
     question: str
     collection_id: str | None = "default"
     top_k: int | None = 4
+
 
 @router.post("/chat")
 def chat(req: ChatRequest, db: Session = Depends(get_db)):
@@ -118,12 +123,15 @@ def chat(req: ChatRequest, db: Session = Depends(get_db)):
 
     qvec = embed_query(q)
 
+    # Get both chunks + cosine distance for gating
+    dist = Chunk.embedding.cosine_distance(qvec).label("distance")
+
     rows = (
-        db.query(Chunk, Document)
+        db.query(Chunk, Document, dist)
         .join(Document, Document.id == Chunk.document_id)
         .filter(Chunk.collection_id == collection_id)
         .filter(Chunk.embedding.isnot(None))
-        .order_by(Chunk.embedding.cosine_distance(qvec))
+        .order_by(dist)
         .limit(top_k)
         .all()
     )
@@ -131,11 +139,17 @@ def chat(req: ChatRequest, db: Session = Depends(get_db)):
     if not rows:
         return {"answer": "Mình chưa tìm thấy dữ liệu phù hợp trong collection này.", "citations": []}
 
-    contexts = []
-    citations = []
-    for (chunk, doc) in rows:
-        src = f"{doc.filename}" + (f" (trang {chunk.page})" if chunk.page else "")
-        contexts.append(f"[{src}]\n{chunk.content}")
+    best_dist = float(rows[0][2])
+    if best_dist > float(settings.RAG_MAX_COSINE_DISTANCE):
+        return {
+            "answer": "Mình chưa tìm thấy đoạn nào đủ liên quan trong tài liệu để trả lời câu hỏi này.",
+            "citations": [],
+        }
+
+    contexts: list[str] = []
+    citations: list[dict] = []
+    for (chunk, doc, d) in rows:
+        contexts.append(chunk.content)
         citations.append(
             {
                 "chunk_id": chunk.id,
@@ -143,16 +157,11 @@ def chat(req: ChatRequest, db: Session = Depends(get_db)):
                 "filename": doc.filename,
                 "page": chunk.page,
                 "chunk_index": chunk.chunk_index,
+                "distance": float(d),  # optional: giúp debug/tuning
                 "snippet": chunk.content[:240] + ("..." if len(chunk.content) > 240 else ""),
             }
         )
 
-    prompt = build_prompt(q, contexts)
-    answer = try_ollama(prompt)
-
-    answer = try_ollama(prompt)
-
-    if not answer:
-        answer = build_fallback_answer(q, contexts)
-
+    # "fallback" giờ là grounded/extractive (không hardcode fact nữa)
+    answer = build_fallback_answer(q, contexts)
     return {"answer": answer, "citations": citations}
