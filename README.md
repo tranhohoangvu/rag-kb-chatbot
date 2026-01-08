@@ -99,11 +99,59 @@ When you call `POST /chat`:
 
 ---
 
-## Quickstart (recommended)
+## Clone & Setup (Local)
 
-### 1) Configure environment
+### 1) Clone repository
+```bash
+git clone <YOUR_REPO_URL>.git
+cd rag-kb-chatbot
+```
 
-Create `backend/.env`:
+**Tip (Windows):** nếu bạn hay gặp lỗi path dài khi clone, bật:
+```bash
+git config --global core.longpaths true
+```
+
+### 2) Start database (Docker)
+```bash
+docker compose up -d db
+```
+
+Enable pgvector extension (one-time per database volume):
+```bash
+docker exec -it rag_db psql -U rag -d ragdb -c "CREATE EXTENSION IF NOT EXISTS vector;"
+```
+
+### 3) Backend: create venv & install libraries
+```bash
+cd backend
+python -m venv .venv
+```
+
+**Activate venv:**
+
+- **Windows (PowerShell):**
+```powershell
+  .\.venv\Scripts\Activate.ps1
+```
+
+- **Windows (cmd):**
+```bat
+  .\.venv\Scripts\activate.bat
+```
+
+- **macOS/Linux:**
+```bash
+  source .venv/bin/activate
+```
+
+**Upgrade pip + install requirements:**
+```bash
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+**Create `backend/.env`:**
 ```env
 DATABASE_URL=postgresql+psycopg://rag:rag@localhost:5432/ragdb
 
@@ -117,51 +165,48 @@ HF_HUB_DISABLE_PROGRESS_BARS=1
 TOKENIZERS_PARALLELISM=false
 ```
 
-Create `frontend/.env`:
+**Run backend:**
+```bash
+python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+**Open:**
+- Swagger UI: http://127.0.0.1:8000/docs
+- Health: http://127.0.0.1:8000/health
+
+### 4) Frontend: install packages & run dev server
+```bash
+cd ../frontend
+npm install
+```
+
+**Create `frontend/.env`:**
 ```env
 VITE_API_URL=http://127.0.0.1:8000
 ```
 
-### 2) Start database (Postgres + pgvector)
-
-From repo root:
+**Run frontend:**
 ```bash
-docker compose up -d db
-```
-
-Enable pgvector extension (one-time per database volume):
-```bash
-docker exec -it rag_db psql -U rag -d ragdb -c "CREATE EXTENSION IF NOT EXISTS vector;"
-```
-
-### 3) Run backend
-```bash
-cd backend
-python -m venv .venv
-
-# Windows:
-.\.venv\Scripts\activate
-# macOS/Linux:
-# source .venv/bin/activate
-
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-
-python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
-```
-
-Open:
-- Swagger UI: http://127.0.0.1:8000/docs
-- Health: http://127.0.0.1:8000/health
-
-### 4) Run frontend
-```bash
-cd frontend
-npm install
 npm run dev
 ```
 
-Open: http://localhost:5173
+**Open:** http://localhost:5173
+
+### 5) Quick test (optional)
+
+**Upload a document:**
+```bash
+curl -X POST "http://127.0.0.1:8000/documents/upload" \
+  -F "collection_id=default" \
+  -F "file=@./samples/mydoc.pdf"
+```
+
+**Chat:**
+```bash
+curl -X POST "http://127.0.0.1:8000/chat" \
+  -H "Content-Type: application/json" \
+  -d '{"question":"What is this project about?","collection_id":"default","top_k":4}'
+```
 
 ---
 
@@ -265,7 +310,7 @@ ON chunks USING hnsw (embedding vector_cosine_ops);
 
 ---
 
-### Commit message chuẩn Conventional Commits
+## Commit message chuẩn Conventional Commits
 
 Bạn dùng commit này cho thay đổi README:
 ```bash
