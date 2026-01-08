@@ -1,40 +1,101 @@
 # RAG Knowledge Base Chatbot
 
-A lightweight **Retrieval-Augmented Generation (RAG)** chatbot that lets you **upload documents**, **index them into Postgres + pgvector**, and **chat with citations**.
+A lightweight **Retrieval-Augmented Generation (RAG)** knowledge-base chatbot that lets you:
 
-**Stack:** FastAPI • Postgres (pgvector) • React (Vite + TS) • Tailwind • Docker Compose
+- **Upload documents** → parse & chunk
+- **Embed locally** with SentenceTransformers (no API key)
+- **Store + search** in **Postgres + pgvector** (cosine distance)
+- **Chat with citations** (filename/page/snippet)
 
----
-
-## Features
-
-- Upload & index: **PDF / DOCX / TXT / MD**
-- Chunking + Embeddings (local): **SentenceTransformers** (no API key required)
-- Vector search in **pgvector** (cosine distance)
-- Chat endpoint returns:
-  - `answer`
-  - `citations[]` (filename, doc_id, page, snippet)
+> Note: the current "answer generation" step is intentionally simple/deterministic via
+> `app/services/fallback_answer.py` (rule-based). Retrieval + citations are real RAG;
+> you can swap in an LLM in `app/services/llm.py` when ready.
 
 ---
 
-## Repo structure
+## Tech stack
 
-```
+- **Backend:** FastAPI + SQLAlchemy
+- **Vector DB:** Postgres + pgvector
+- **Embeddings:** SentenceTransformers (default: `intfloat/multilingual-e5-small`)
+- **Frontend:** Vite + React + TypeScript + TailwindCSS
+- **Dev:** Docker Compose (recommended for DB)
+
+---
+
+## Project structure
+
+Below is the *meaningful* structure (generated folders like `.venv/` and `node_modules/` should be gitignored):
+```text
 rag-kb-chatbot/
-  backend/         # FastAPI + SQLAlchemy + pgvector + embeddings
-  frontend/        # Vite React + Tailwind UI (upload + chat + citations)
-  docker-compose.yml
+├─ backend/
+│  ├─ app/
+│  │  ├─ main.py                  # FastAPI app + CORS + create tables at startup
+│  │  ├─ api/
+│  │  │  └─ routes.py             # /health /collections /documents /documents/upload /chat
+│  │  ├─ core/
+│  │  │  └─ config.py             # env settings (DATABASE_URL, EMBED_*)
+│  │  ├─ db/
+│  │  │  ├─ models.py             # Document, Chunk (pgvector Vector(EMBED_DIM))
+│  │  │  └─ session.py            # SQLAlchemy engine + get_db()
+│  │  └─ services/
+│  │     ├─ parsing.py            # pdf/docx/txt/md parsing
+│  │     ├─ chunking.py           # chunking (chunk_chars=1200, overlap=200)
+│  │     ├─ embeddings.py         # embed_passages(), embed_query()
+│  │     ├─ fallback_answer.py    # deterministic answer builder (demo)
+│  │     └─ llm.py                # (placeholder) plug LLM here
+│  ├─ storage/                    # uploaded files saved here
+│  ├─ requirements.txt
+│  └─ .env                        # local config (you create this)
+│
+├─ frontend/
+│  ├─ src/                        # UI: upload + chat + citations
+│  ├─ index.html
+│  ├─ package.json
+│  ├─ vite.config.ts
+│  ├─ tailwind.config.js
+│  └─ .env                        # VITE_API_URL (you create this)
+│
+└─ docker-compose.yml             # Postgres + pgvector (recommended)
 ```
+
+---
+
+## How it works (RAG pipeline)
+
+### 1) Ingestion (Upload → Parse → Chunk → Embed → Store)
+
+When you call `POST /documents/upload`:
+
+- File is saved to `backend/storage/` (safe name with UUID prefix).
+- Text is extracted by file type:
+  - `.pdf` uses `pypdf`
+  - `.docx` uses `python-docx`
+  - `.txt/.md` plain text
+- Text is chunked with a sliding window: `chunk_chars=1200`, `overlap=200`.
+- Chunks are embedded in batch (SentenceTransformers).
+- Rows are inserted into:
+  - `documents` (one per file)
+  - `chunks` (one per chunk, with embedding vector)
+
+### 2) Retrieval (Embed query → Vector search)
+
+When you call `POST /chat`:
+
+- Question is embedded (`embed_query()`).
+- Database query fetches `top_k` chunks ordered by `cosine_distance(query_vector)`.
+- API returns:
+  - `answer` (currently created by `build_fallback_answer()`)
+  - `citations[]` (doc, page, chunk_index, snippet)
 
 ---
 
 ## Requirements
 
-- **Docker Desktop** (with WSL2 on Windows)
-- **Python 3.11+**
-- **Node.js 18+** (recommended)
-
-> First time embedding model run may download a few hundred MB and take a while.
+- Python 3.11+
+- Node.js 18+
+- Docker Desktop (recommended for Postgres)
+- First run may download the embedding model (a few hundred MB).
 
 ---
 
@@ -42,8 +103,7 @@ rag-kb-chatbot/
 
 ### 1) Configure environment
 
-Create **`backend/.env`**:
-
+Create `backend/.env`:
 ```env
 DATABASE_URL=postgresql+psycopg://rag:rag@localhost:5432/ragdb
 
@@ -57,32 +117,24 @@ HF_HUB_DISABLE_PROGRESS_BARS=1
 TOKENIZERS_PARALLELISM=false
 ```
 
-Create **`frontend/.env`**:
-
+Create `frontend/.env`:
 ```env
 VITE_API_URL=http://127.0.0.1:8000
 ```
 
----
-
 ### 2) Start database (Postgres + pgvector)
 
 From repo root:
-
 ```bash
 docker compose up -d db
 ```
 
 Enable pgvector extension (one-time per database volume):
-
 ```bash
 docker exec -it rag_db psql -U rag -d ragdb -c "CREATE EXTENSION IF NOT EXISTS vector;"
 ```
 
----
-
 ### 3) Run backend
-
 ```bash
 cd backend
 python -m venv .venv
@@ -99,167 +151,123 @@ python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 Open:
-- Swagger UI: `http://127.0.0.1:8000/docs`
-- Health: `http://127.0.0.1:8000/health`
-
----
+- Swagger UI: http://127.0.0.1:8000/docs
+- Health: http://127.0.0.1:8000/health
 
 ### 4) Run frontend
-
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-Open:
-- `http://localhost:5173`
-
----
-
-## How to use
-
-### Upload & index documents (UI)
-
-In the UI:
-1. Set `Collection` (default: `default`)
-2. Upload `.pdf / .docx / .txt / .md`
-3. Click **Upload & Index**
-
-### Ask questions (UI)
-
-Type a question → **Send**  
-You’ll get:
-- `Answer`
-- `Sources` with citations
+Open: http://localhost:5173
 
 ---
 
 ## API
 
 ### `GET /health`
-Returns server status.
+Simple server health check.
+
+### `GET /collections`
+Returns all `collection_id` values found in documents.
+
+### `GET /documents?collection_id=default`
+List documents in a collection.
 
 ### `POST /documents/upload`
-Multipart form-data:
-- `collection_id`: string (default: `default`)
-- `file`: PDF/DOCX/TXT/MD
+Upload and index a file.
 
-Response:
-```json
-{
-  "document_id": 1,
-  "filename": "file.txt",
-  "collection_id": "default",
-  "chunks_indexed": 12
-}
+**Body:** `multipart/form-data`
+- `collection_id` (optional, default=`default`)
+- `file` (`.pdf/.docx/.txt/.md`)
+
+Example:
+```bash
+curl -X POST "http://127.0.0.1:8000/documents/upload" \
+  -F "collection_id=default" \
+  -F "file=@./samples/mydoc.pdf"
 ```
 
 ### `POST /chat`
-JSON:
+Ask a question (returns answer + citations).
+
+**Request body:**
 ```json
 {
-  "question": "What is this project?",
+  "question": "What is this project about?",
   "collection_id": "default",
   "top_k": 4
 }
 ```
 
-Response:
+Example:
+```bash
+curl -X POST "http://127.0.0.1:8000/chat" \
+  -H "Content-Type: application/json" \
+  -d '{"question":"What is this project about?","collection_id":"default","top_k":4}'
+```
+
+**Response shape:**
 ```json
 {
-  "answer": "...",
+  "answer": "…",
   "citations": [
     {
-      "chunk_id": 1,
-      "document_id": 1,
-      "filename": "file.txt",
-      "page": null,
-      "chunk_index": 0,
-      "snippet": "..."
+      "chunk_id": 123,
+      "document_id": 10,
+      "filename": "mydoc.pdf",
+      "page": 2,
+      "chunk_index": 5,
+      "snippet": "…"
     }
   ]
 }
 ```
 
-### (Optional) Management endpoints
-If enabled in your backend code:
-- `GET /collections`
-- `GET /documents?collection_id=default`
-
 ---
 
-## Test from terminal
+## Optional: speed up vector search
 
-### PowerShell-friendly upload (curl.exe)
-From repo root:
+For larger datasets, add a pgvector index (pick one):
 
-```powershell
-curl.exe -X POST "http://127.0.0.1:8000/documents/upload" `
-  -F "collection_id=default" `
-  -F "file=@test.txt"
+**IVFFLAT** (requires ANALYZE, good for many vectors):
+```sql
+CREATE INDEX IF NOT EXISTS ix_chunks_embedding_ivfflat
+ON chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 ```
 
-### PowerShell-friendly chat (avoid JSON quoting issues)
-```powershell
-'{"question":"Câu nhắc để test tìm kiếm chính xác là gì?","collection_id":"default","top_k":4}' `
-  | Set-Content -Encoding utf8 payload.json
-
-curl.exe -X POST "http://127.0.0.1:8000/chat" `
-  -H "Content-Type: application/json" `
-  --data-binary "@payload.json"
-```
-
----
-
-## Vector index (pgvector)
-
-For small datasets, brute-force search is fine.
-
-For larger datasets, consider indexes:
-- **HNSW** (good recall, recommended)
-- **IVFFLAT** (needs more data; low recall warning with tiny tables)
-
-Example HNSW index:
-
+**HNSW** (often great quality/speed, supports dynamic insert well):
 ```sql
 CREATE INDEX IF NOT EXISTS ix_chunks_embedding_hnsw
-ON chunks USING hnsw (embedding vector_cosine_ops)
-WITH (m=16, ef_construction=64);
+ON chunks USING hnsw (embedding vector_cosine_ops);
 ```
 
 ---
 
 ## Troubleshooting
 
-### `docker : The term 'docker' is not recognized...`
-Docker CLI not on PATH in Windows PowerShell.
-- Restart terminal (and sometimes Windows).
-- Or run Docker with full path:
-  `C:\Program Files\Docker\Docker\resources\bin\docker.exe ...`
+- **"No extractable text found"**: PDF might be scanned (image-only). You'll need OCR.
+- **"CREATE EXTENSION vector" fails**: ensure your Postgres image includes pgvector.
+- **Empty results in /chat**: the collection might have no chunks indexed, or `collection_id` mismatch.
+- **Slow first embedding**: model download + warm-up (normal for first run).
 
-### `type "vector" does not exist`
-You forgot to enable the extension:
+---
+
+## Roadmap ideas
+
+- Replace `fallback_answer.py` with an LLM answer generator (prompt = question + retrieved contexts).
+- Add re-ranking (cross-encoder) before generation.
+- Add streaming responses + chat history.
+- Add document deletion / re-indexing endpoints.
+- Add chunk metadata (title/section headers) & better chunking.
+
+---
+
+### Commit message chuẩn Conventional Commits
+
+Bạn dùng commit này cho thay đổi README:
 ```bash
-docker exec -it rag_db psql -U rag -d ragdb -c "CREATE EXTENSION IF NOT EXISTS vector;"
+docs(readme): update project structure and usage guide
 ```
-
-### PowerShell JSON errors with curl
-Use `payload.json` + `--data-binary "@payload.json"` (see Test section).
-
-### HuggingFace download seems “stuck”
-First run downloads the embedding model and can take time. After that it uses cache under:
-`%USERPROFILE%\.cache\huggingface\hub`
-
----
-
-## Roadmap (nice-to-have)
-
-- Delete document / clear collection endpoints
-- Better chunking + dedup + rerank
-- HNSW indexing by default for larger KBs
-
----
-
-## License
-No license is included by default. Add one if you plan to distribute publicly.
