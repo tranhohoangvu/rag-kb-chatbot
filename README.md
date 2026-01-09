@@ -61,6 +61,12 @@ rag-kb-chatbot/
 
 ---
 
+## Demo
+
+![RAG KB Chatbot UI](demo-ui.png)
+
+---
+
 ## How it works (RAG pipeline)
 
 ### 1) Ingestion (Upload → Parse → Chunk → Embed → Store)
